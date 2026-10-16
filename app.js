@@ -109,7 +109,6 @@ function renderLogin() {
   $("#nav").hidden = true;
   $("#main").innerHTML = `
     <form class="card login stack" id="login">
-      <img class="login-logo" src="logo.png" alt="Warenhuis Willemsen">
       <h1>Inloggen</h1>
       <p class="muted">Voor sportschoolaccounts: plan trainingen en programma's voor je leden. Leden gebruiken de app.</p>
       <label>Gebruikersnaam of e-mail <input name="login" autocomplete="username" required></label>
@@ -117,7 +116,7 @@ function renderLogin() {
       <button class="primary" type="submit">Inloggen</button>
       <p class="error small" id="login-error"></p>
     </form>
-    <p class="muted small copyright">© ${new Date().getFullYear()} Warenhuis Willemsen</p>`;
+    <div class="copyright muted small"><img src="logo.png" alt="">© ${new Date().getFullYear()} Warenhuis Willemsen</div>`;
   $("#login").onsubmit = async (event) => {
     event.preventDefault();
     const form = new FormData(event.target);

@@ -132,5 +132,5 @@ dialog .foot { display: flex; gap: 10px; justify-content: flex-end; padding: 14p
   .interval-row { grid-template-columns: 1fr 1fr; }
   .interval-row .n { grid-column: 1 / -1; padding: 0; }
 }
-.login-logo { display: block; width: 200px; max-width: 100%; margin: 0 auto 8px; border-radius: 10px; }
-.copyright { text-align: center; margin-top: -40px; }
+.copyright { text-align: center; margin-top: -32px; }
+.copyright img { display: block; width: 56px; margin: 0 auto 6px; border-radius: 4px; opacity: 0.6; }
