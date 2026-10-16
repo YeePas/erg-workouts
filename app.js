@@ -186,7 +186,7 @@ function renderPlanning() {
       <button data-shift="-1">← Eerder</button><button data-shift="0">Deze week</button><button data-shift="1">Later →</button>
       <button class="primary" id="new-oneoff">+ Losse training</button>
     </div>
-    <p class="muted">Wat de leden van ${esc(gym().name)} in de app zien. Code voor leden: <strong>${esc(gym().join_code)}</strong></p>
+    <p class="muted">Code voor leden: <strong>${esc(gym().join_code)}</strong> <button class="link" id="edit-code">Wijzig</button></p>
     ${weeks.map((weekStart) => {
       const days = [0, 1, 2, 3, 4, 5, 6].map((d) => addDays(weekStart, d));
       const items = scheduled(weekStart, addDays(weekStart, 7));
@@ -205,6 +205,7 @@ function renderPlanning() {
     state.weekOffset = shift === 0 ? 0 : state.weekOffset + shift * 4;
     renderPlanning();
   }));
+  $("#edit-code").onclick = editJoinCode;
   $("#new-oneoff").onclick = () => editOneOff({
     id: uuid(), gym_id: state.gymId, scheduled_for: dayString(new Date()), note: "", workout: fresh(standard("rower")[7]),
   });
@@ -239,6 +240,31 @@ function editOneOff(item) {
       };
       await run(db.from("gym_workouts").upsert(row), "Training gepubliceerd");
       await loadGym();
+    },
+  });
+}
+
+/** Members join with this code in the app; changing it doesn't affect existing members. */
+function editJoinCode() {
+  openDialog({
+    title: "Code voor leden",
+    body: `<label>Code <input id="join-code" value="${esc(gym().join_code)}" maxlength="16" style="text-transform:uppercase"></label>
+      <p class="muted small">Nieuwe leden vullen deze code in de app in bij Account → Sportschool toevoegen. 4–16 letters of cijfers.
+      Bestaande leden blijven gewoon lid.</p>`,
+    onSave: async (root) => {
+      const code = $("#join-code", root).value.trim().toUpperCase();
+      if (!/^[A-Z0-9]{4,16}$/.test(code)) {
+        toast("Gebruik 4 tot 16 letters of cijfers, zonder spaties.", true);
+        throw new Error("invalid code");
+      }
+      const { error } = await db.from("gyms").update({ join_code: code }).eq("id", state.gymId);
+      if (error) {
+        toast(error.code === "23505" ? "Deze code is al in gebruik door een andere sportschool." : error.message, true);
+        throw error;
+      }
+      gym().join_code = code;
+      toast("Code gewijzigd");
+      renderPlanning();
     },
   });
 }
@@ -551,7 +577,6 @@ async function renderLeaderboard() {
 
   $("#main").innerHTML = `
     <div class="row"><h1>Leaderboard</h1><span class="spacer"></span><button class="danger" id="reset">Leegmaken</button></div>
-    <p class="muted">Alleen leden van ${esc(gym().name)}; het sportschoolaccount telt niet mee.</p>
     <div class="row">${segmented("kind", [["benchmarks", "Benchmarks"], ["meters", "Meters"]])}
       ${segmented("machine", MACHINES.map((m) => [m, MACHINE_LABEL[m]]))}
       ${b.kind === "meters" ? segmented("period", [["week", "Deze week"], ["month", "Deze maand"]]) : ""}</div>
