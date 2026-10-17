@@ -4,7 +4,7 @@ import {
   uuid, clock, clockTenths, percent, parseClock, watts, paceDistance,
   workout, interval, summary, standard, fresh,
   dayString, parseDay, monday, addDays, sessionDate, programWeek, programStatus,
-  sessionsInWeek, copyWeek, programFromTemplate,
+  sessionsInWeek, copyWeek, programFromTemplate, copyFor,
 } from "./model.js";
 
 // Same project and publishable key as the app; row level security protects the data.
@@ -156,6 +156,14 @@ function scheduled(from, to) {
   return items.sort((a, b) => a.date - b.date);
 }
 
+/** A compact "Kopieer voor…" menu with the other machines. */
+function copyForSelect(machine, attribute, value) {
+  return `<select class="copy-for" ${attribute}="${value}" title="Dezelfde training voor een ander apparaat">
+    <option value="">Kopieer voor…</option>
+    ${MACHINES.filter((m) => m !== machine).map((m) => `<option value="${m}">${MACHINE_ICON[m]} ${MACHINE_LABEL[m]}</option>`).join("")}
+  </select>`;
+}
+
 function trainingRow(item) {
   const w = item.workout;
   const label = item.program ? `<span class="tag">${esc(item.program.name)} · week ${item.session.week}</span>` : `<span class="tag orange">Losse training</span>`;
@@ -166,6 +174,7 @@ function trainingRow(item) {
       <div class="meta">${MACHINE_LABEL[w.machine]} · ${esc(summary(w))}</div>
       ${item.note ? `<div class="meta">${esc(item.note)}</div>` : ""}
     </div>
+    ${copyForSelect(w.machine, "data-copy-item", item.oneOff ? `oneoff:${item.oneOff.id}` : `session:${item.program.id}:${item.session.id}`)}
     ${item.oneOff
       ? `<button class="link" data-edit-oneoff="${item.oneOff.id}">Wijzig</button><button class="link danger" data-delete-oneoff="${item.oneOff.id}">Verwijder</button>`
       : `<button class="link" data-open-program="${item.program.id}" data-week="${item.session.week}">Open programma</button>`}
@@ -215,6 +224,23 @@ function renderPlanning() {
     if (!confirm("Deze training verwijderen?")) return;
     await run(db.from("gym_workouts").delete().eq("id", b.dataset.deleteOneoff), "Training verwijderd");
     await loadGym();
+  }));
+  $$("[data-copy-item]").forEach((select) => (select.onchange = () => {
+    const machine = select.value;
+    select.value = "";
+    if (!machine) return;
+    // Copies become a one-off training on the same day; the original stays as it is.
+    const [kind, id, sessionId] = select.dataset.copyItem.split(":");
+    let source;
+    if (kind === "oneoff") {
+      const w = state.workouts.find((x) => x.id === id);
+      source = { day: w.scheduled_for, note: w.note, workout: w.workout };
+    } else {
+      const program = state.programs.find((p) => p.id === id);
+      const session = program.sessions.find((s) => s.id === sessionId);
+      source = { day: dayString(sessionDate(program, session)), note: session.note, workout: session.workout };
+    }
+    editOneOff({ id: uuid(), gym_id: state.gymId, scheduled_for: source.day, note: source.note || "", workout: copyFor(source.workout, machine) });
   }));
   $$("[data-open-program]").forEach((b) => (b.onclick = () => {
     state.page = "programs";
@@ -361,6 +387,7 @@ function renderProgramEditor() {
           <div class="body"><div class="name">${WEEKDAYS[s.weekday - 1]} · ${esc(s.workout.name)}</div>
             <div class="meta">${MACHINE_LABEL[s.workout.machine]} · ${esc(summary(s.workout))}</div>
             ${s.note ? `<div class="meta">${esc(s.note)}</div>` : ""}</div>
+          ${copyForSelect(s.workout.machine, "data-copy-session", s.id)}
           <button class="link" data-edit-session="${s.id}">Wijzig</button>
           <button class="link danger" data-delete-session="${s.id}">Verwijder</button>
         </div>`).join("") || `<p class="muted small">Geen trainingen.</p>`}
@@ -402,6 +429,14 @@ function renderProgramEditor() {
     editSession({ id: uuid(), week, weekday, note: "", workout: fresh(last) }, true);
   }));
   $$("[data-edit-session]").forEach((b) => (b.onclick = () => { readHeader(); editSession(structuredClone(p.sessions.find((s) => s.id === b.dataset.editSession))); }));
+  $$("[data-copy-session]").forEach((select) => (select.onchange = () => {
+    const machine = select.value;
+    select.value = "";
+    if (!machine) return;
+    readHeader();
+    const s = p.sessions.find((x) => x.id === select.dataset.copySession);
+    editSession({ id: uuid(), week: s.week, weekday: s.weekday, note: s.note || "", workout: copyFor(s.workout, machine) }, true);
+  }));
   $$("[data-delete-session]").forEach((b) => (b.onclick = () => {
     readHeader();
     p.sessions = p.sessions.filter((s) => s.id !== b.dataset.deleteSession);

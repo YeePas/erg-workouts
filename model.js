@@ -137,6 +137,8 @@ export function standard(machine) {
 }
 
 /** A copy with its own id, so a training gets its own leaderboard. */
+/** A new copy for another machine, with distances converted ("Kopieer voor …"). */
+export const copyFor = (w, machine) => fresh(onMachine(w, machine));
 export const fresh = (w) => ({ ...structuredClone(w), id: uuid(), intervals: (w.intervals || []).map((i) => ({ ...i, id: uuid() })) });
 
 // MARK: Dates (weeks start on Monday)
