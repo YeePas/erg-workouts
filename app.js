@@ -25,7 +25,7 @@ const state = {
   page: "planning",
   weekOffset: 0,     // planning: weeks from this week
   program: null,     // program being edited (a copy)
-  board: { kind: "benchmarks", machine: "rower", period: "week" },
+  board: { kind: "programs", program: null, training: null },
 };
 
 const gym = () => state.gyms.find((g) => g.id === state.gymId);
@@ -389,7 +389,7 @@ function renderProgramEditor() {
         <label>Opbouw % vermogen per week <input type="number" id="prog-percent" step="0.1" value="${progression.percent}"></label>
         <label>Opbouw vaste pace (s per week) <input type="number" id="prog-seconds" step="1" value="${progression.seconds}"></label>
       </div>
-      <p class="muted small">Bij "Kopieer naar volgende week" gaan percentages omhoog met de opbouw (bijv. 90% → 95% → 100%) en veranderen vaste paces met de seconden (negatief = sneller).</p>
+      <p class="muted small">Bij "Kopieer naar alle volgende weken" gaan percentages elke week omhoog met de opbouw (bijv. 90% → 95% → 100%) en veranderen vaste paces met de seconden (negatief = sneller).</p>
     </div>
     ${Array.from({ length: p.weeks }, (_, i) => i + 1).map((week) => {
       const sessions = sessionsInWeek(p, week);
@@ -399,15 +399,13 @@ function renderProgramEditor() {
           <span class="muted small">${start.toLocaleDateString("nl-NL", { day: "numeric", month: "long" })}${programWeek(p) === week ? " · deze week" : ""}</span>
           <span class="spacer"></span>
           <button class="link" data-add="${week}">+ Training</button>
-          ${week < p.weeks ? `<button class="link" data-copy="${week}" ${sessions.length ? "" : "disabled"}>Kopieer naar week ${week + 1}</button>
-            <button class="link" data-copy-all="${week}" ${sessions.length ? "" : "disabled"}>…naar alle volgende</button>` : ""}
+          ${week < p.weeks ? `<button class="link" data-copy-all="${week}" ${sessions.length ? "" : "disabled"}>Kopieer naar alle volgende weken</button>` : ""}
         </div>
         ${sessions.map((s) => `<div class="training">
           <div class="icon">${MACHINE_ICON[s.workout.machine]}</div>
           <div class="body"><div class="name">${WEEKDAYS[s.weekday - 1]} · ${esc(s.workout.name)}</div>
             <div class="meta">${MACHINE_LABEL[s.workout.machine]} · ${esc(summary(s.workout))}</div>
             ${s.note ? `<div class="meta">${esc(s.note)}</div>` : ""}</div>
-          ${copyForSelect(s.workout.machine, "data-copy-session", s.id)}
           <button class="link" data-edit-session="${s.id}">Wijzig</button>
           <button class="link danger" data-delete-session="${s.id}">Verwijder</button>
         </div>`).join("") || `<p class="muted small">Geen trainingen.</p>`}
@@ -450,22 +448,9 @@ function renderProgramEditor() {
     editSession({ id: uuid(), week, weekday, note: "", workout: fresh(last) }, true);
   }));
   $$("[data-edit-session]").forEach((b) => (b.onclick = () => { readHeader(); editSession(structuredClone(p.sessions.find((s) => s.id === b.dataset.editSession))); }));
-  $$("[data-copy-session]").forEach((select) => (select.onchange = () => {
-    const machine = select.value;
-    select.value = "";
-    if (!machine) return;
-    readHeader();
-    const s = p.sessions.find((x) => x.id === select.dataset.copySession);
-    editSession({ id: uuid(), week: s.week, weekday: s.weekday, note: s.note || "", workout: copyFor(s.workout, machine) }, true);
-  }));
   $$("[data-delete-session]").forEach((b) => (b.onclick = () => {
     readHeader();
     p.sessions = p.sessions.filter((s) => s.id !== b.dataset.deleteSession);
-    renderProgramEditor();
-  }));
-  $$("[data-copy]").forEach((b) => (b.onclick = () => {
-    readHeader();
-    copyWeek(p, Number(b.dataset.copy), progression.seconds, progression.percent);
     renderProgramEditor();
   }));
   $$("[data-copy-all]").forEach((b) => (b.onclick = () => {
@@ -627,21 +612,44 @@ function readWorkoutForm(root) {
 
 // MARK: Leaderboard
 
+/** Running programs first, then upcoming, then finished (newest first). */
+function leaderboardPrograms() {
+  const order = (p) => (programWeek(p) ? 0 : parseDay(p.start_date) > new Date() ? 1 : 2);
+  return [...state.programs].sort((a, b) => order(a) - order(b) || b.start_date.localeCompare(a.start_date));
+}
+
+/** Trainings of the last four weeks up to today, newest first, with a stable key. */
+function leaderboardTrainings() {
+  const today = new Date();
+  const end = addDays(new Date(today.getFullYear(), today.getMonth(), today.getDate()), 1);
+  return scheduled(addDays(end, -29), end).reverse().map((item) => ({
+    ...item, key: item.oneOff ? item.oneOff.id : item.session.id,
+  }));
+}
+
 async function renderLeaderboard() {
   const b = state.board;
   const segmented = (key, options) => `<div class="segmented">${options.map(([value, label]) =>
     `<button data-${key}="${value}" class="${b[key] === value ? "active" : ""}">${label}</button>`).join("")}</div>`;
+  const programs = leaderboardPrograms();
+  const trainings = leaderboardTrainings();
+  if (!programs.some((p) => p.id === b.program)) b.program = programs[0]?.id ?? null;
+  if (!trainings.some((t) => t.key === b.training)) b.training = trainings[0]?.key ?? null;
+  const dateLabel = (date) => date.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" });
+
+  const picker = b.kind === "programs"
+    ? (programs.length ? `<select id="pick">${programs.map((p) =>
+        `<option value="${p.id}" ${p.id === b.program ? "selected" : ""}>${esc(p.name)} · ${programStatus(p)}</option>`).join("")}</select>` : "")
+    : (trainings.length ? `<select id="pick">${trainings.map((t) =>
+        `<option value="${t.key}" ${t.key === b.training ? "selected" : ""}>${dateLabel(t.date)} · ${esc(t.workout.name)} · ${MACHINE_LABEL[t.workout.machine]}</option>`).join("")}</select>` : "");
 
   $("#main").innerHTML = `
     <div class="row"><h1>Leaderboard</h1><span class="spacer"></span><button class="danger" id="reset">Leegmaken</button></div>
-    <div class="row">${segmented("kind", [["benchmarks", "Benchmarks"], ["meters", "Meters"]])}
-      ${segmented("machine", MACHINES.map((m) => [m, MACHINE_LABEL[m]]))}
-      ${b.kind === "meters" ? segmented("period", [["week", "Deze week"], ["month", "Deze maand"]]) : ""}</div>
+    <div class="row">${segmented("kind", [["programs", "Programma's"], ["trainings", "Trainingen"]])} ${picker}</div>
     <div class="card" style="margin-top:14px" id="board"><p class="muted">Laden…</p></div>`;
 
-  for (const key of ["kind", "machine", "period"]) {
-    $$(`[data-${key}]`).forEach((button) => (button.onclick = () => { b[key] = button.dataset[key]; renderLeaderboard(); }));
-  }
+  $$("[data-kind]").forEach((button) => (button.onclick = () => { b.kind = button.dataset.kind; renderLeaderboard(); }));
+  $("#pick") && ($("#pick").onchange = (e) => { b[b.kind === "programs" ? "program" : "training"] = e.target.value; renderLeaderboard(); });
   $("#reset").onclick = async () => {
     if (!confirm(`Leaderboard van ${gym().name} leegmaken? Alle ranglijsten beginnen opnieuw vanaf nu; resultaten blijven bewaard.`)) return;
     await run(db.rpc("reset_leaderboard", { gym: state.gymId }), "Leaderboard leeggemaakt");
@@ -649,20 +657,34 @@ async function renderLeaderboard() {
   };
 
   const medal = (rank) => ["🥇", "🥈", "🥉"][rank] ?? rank + 1;
-  if (b.kind === "benchmarks") {
-    const rows = await run(db.rpc("leaderboard_benchmarks", { gym: state.gymId, machine_name: b.machine }));
-    $("#board").innerHTML = rows.length ? `<table><tr><th></th><th>Naam</th><th class="num">${paceDistance(b.machine)}m</th><th class="num">Watt</th><th class="num">Datum</th></tr>
-      ${rows.map((r, i) => `<tr><td class="rank">${medal(i)}</td><td>${esc(r.name)}</td><td class="num"><strong>${clockTenths(r.seconds)}</strong></td>
-        <td class="num">${Math.round(watts(r.seconds))} W</td><td class="num muted">${new Date(r.recorded_at).toLocaleDateString("nl-NL")}</td></tr>`).join("")}</table>`
-      : `<p class="muted">Nog geen ${MACHINE_LABEL[b.machine]}-benchmarks.</p>`;
-  } else {
-    const now = new Date();
-    const since = b.period === "week" ? monday(now) : new Date(now.getFullYear(), now.getMonth(), 1);
-    const rows = await run(db.rpc("leaderboard_meters", { gym: state.gymId, since: since.toISOString(), machine_name: b.machine }));
-    $("#board").innerHTML = rows.length ? `<table><tr><th></th><th>Naam</th><th class="num">Meters</th><th class="num">Trainingen</th></tr>
+  if (b.kind === "programs") {
+    const program = programs.find((p) => p.id === b.program);
+    if (!program) return ($("#board").innerHTML = `<p class="muted">Nog geen programma's. Maak er een bij Programma's.</p>`);
+    const rows = await run(db.rpc("leaderboard_program", { gym: state.gymId, program: program.id }));
+    $("#board").innerHTML = (rows?.length ? `<table><tr><th></th><th>Naam</th><th class="num">Meters</th><th class="num">Trainingen</th></tr>
       ${rows.map((r, i) => `<tr><td class="rank">${medal(i)}</td><td>${esc(r.name)}</td>
         <td class="num"><strong>${Math.round(r.meters).toLocaleString("nl-NL")} m</strong></td><td class="num">${r.workouts}</td></tr>`).join("")}</table>`
-      : `<p class="muted">Nog geen meters ${b.period === "week" ? "deze week" : "deze maand"}.</p>`;
+      : `<p class="muted">Nog geen resultaten voor ${esc(program.name)}.</p>`)
+      + `<p class="muted small">Alle meters van de trainingen uit dit programma, op het geplande apparaat.</p>`;
+  } else {
+    const item = trainings.find((t) => t.key === b.training);
+    if (!item) return ($("#board").innerHTML = `<p class="muted">Geen trainingen in de afgelopen vier weken.</p>`);
+    const w = item.workout;
+    const byTime = w.kind === "distance" || w.kind === "distanceIntervals" || (w.kind === "custom" && w.intervals.every((i) => i.usesDistance));
+    const rows = await run(db.rpc("leaderboard_training", { gym: state.gymId, workout: w.id, machine_name: w.machine })) ?? [];
+    const best = Object.values(rows.reduce((acc, r) => {
+      const old = acc[r.member];
+      if (!old || (byTime ? r.time_seconds < old.time_seconds : r.distance_meters > old.distance_meters)) acc[r.member] = r;
+      return acc;
+    }, {})).sort((x, y) => (byTime ? x.time_seconds - y.time_seconds : y.distance_meters - x.distance_meters));
+    const unit = paceDistance(w.machine);
+    $("#board").innerHTML = (best.length ? `<table><tr><th></th><th>Naam</th><th class="num">${byTime ? "Tijd" : "Meters"}</th><th class="num">Pace</th><th class="num">Datum</th></tr>
+      ${best.map((r, i) => `<tr><td class="rank">${medal(i)}</td><td>${esc(r.name)}</td>
+        <td class="num"><strong>${byTime ? clockTenths(r.time_seconds) : `${Math.round(r.distance_meters).toLocaleString("nl-NL")} m`}</strong></td>
+        <td class="num">${r.distance_meters > 0 ? clockTenths(r.time_seconds / r.distance_meters * unit) : "–"}/${unit}m</td>
+        <td class="num muted">${new Date(r.date).toLocaleDateString("nl-NL")}</td></tr>`).join("")}</table>`
+      : `<p class="muted">Nog geen resultaten voor deze training.</p>`)
+      + `<p class="muted small">${esc(summary(w))} · ${byTime ? "snelste tijd telt" : "meeste meters telt"}.</p>`;
   }
 }
 
