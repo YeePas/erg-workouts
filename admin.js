@@ -74,15 +74,78 @@ function go(page) {
 async function load() {
   renderAccount();
   if (!state.user) return renderLogin();
-  const { data: isAdmin } = await db.rpc("is_admin");
-  if (!isAdmin) {
-    $("#nav").hidden = true;
+  $("#nav").hidden = true;
+  const { data: isAdmin, error } = await db.rpc("is_admin_account");
+  if (error || !isAdmin) {
     $("#main").innerHTML = `<div class="card login stack"><h2>Geen toegang</h2>
-      <p class="muted">Dit account is geen beheerder. Draai supabase/admin.sql en controleer het e-mailadres bovenin dat bestand.</p></div>`;
+      <p class="muted">${error ? "Draai eerst supabase/admin-mfa.sql." : "Dit account is geen beheerder. Draai supabase/admin.sql en controleer het e-mailadres bovenin dat bestand."}</p></div>`;
     return;
+  }
+  // The database only answers admin requests from a session with a second factor (aal2).
+  const { data: level } = await db.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (level?.currentLevel !== "aal2") {
+    const { data: factors } = await db.auth.mfa.listFactors();
+    const totp = factors?.totp?.find((f) => f.status === "verified");
+    return totp ? renderMfaCode(totp.id) : renderMfaSetup();
   }
   $("#nav").hidden = false;
   render();
+}
+
+// MARK: Tweestapsverificatie
+
+/** First time: scan a QR code in an authenticator app and confirm with a code. */
+async function renderMfaSetup() {
+  $("#main").innerHTML = `<div class="card login stack"><h2>Tweestapsverificatie instellen</h2><p class="muted">Laden…</p></div>`;
+  // Leftovers from an earlier, unfinished setup would block a new one.
+  const { data: factors } = await db.auth.mfa.listFactors();
+  for (const factor of factors?.all ?? []) {
+    if (factor.status === "unverified") await db.auth.mfa.unenroll({ factorId: factor.id });
+  }
+  const { data, error } = await db.auth.mfa.enroll({ factorType: "totp", friendlyName: "Erg Workouts beheer" });
+  if (error) {
+    $("#main").innerHTML = `<div class="card login stack"><h2>Tweestapsverificatie</h2>
+      <p class="error">${esc(error.message)}</p>
+      <p class="muted small">Staat TOTP aan in Supabase → Authentication → Multi-Factor?</p></div>`;
+    return;
+  }
+  $("#main").innerHTML = `
+    <form class="card login stack" id="mfa">
+      <h2>Tweestapsverificatie instellen</h2>
+      <p class="muted">Het beheer is alleen bereikbaar met een tweede stap. Scan de QR-code met een authenticator-app (Apple Wachtwoorden, Google Authenticator, 1Password) en vul de code van 6 cijfers in.</p>
+      <img class="qr" src="${data.totp.qr_code}" alt="QR-code voor je authenticator-app">
+      <details><summary class="small">Kan niet scannen? Gebruik deze sleutel</summary><p class="mono">${esc(data.totp.secret)}</p></details>
+      <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+      <button class="primary" type="submit">Bevestigen</button>
+      <p class="error small" id="mfa-error"></p>
+    </form>`;
+  bindMfaForm(data.id);
+}
+
+/** Every sign-in: the code from the authenticator app. */
+function renderMfaCode(factorId) {
+  $("#main").innerHTML = `
+    <form class="card login stack" id="mfa">
+      <h2>Tweestapsverificatie</h2>
+      <p class="muted">Vul de code van 6 cijfers uit je authenticator-app in.</p>
+      <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label>
+      <button class="primary" type="submit">Inloggen</button>
+      <p class="error small" id="mfa-error"></p>
+    </form>`;
+  bindMfaForm(factorId);
+}
+
+function bindMfaForm(factorId) {
+  $("#mfa").onsubmit = async (event) => {
+    event.preventDefault();
+    const code = String(new FormData(event.target).get("code")).replace(/\s/g, "");
+    const { error } = await db.auth.mfa.challengeAndVerify({ factorId, code });
+    if (error) {
+      $("#mfa-error").textContent = error.message.includes("Invalid") ? "Onjuiste code, probeer het opnieuw." : error.message;
+      return;
+    }
+    load();
+  };
 }
 
 function renderAccount() {

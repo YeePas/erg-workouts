@@ -178,3 +178,4 @@ details + details { border-top: 1px solid var(--line); }
 nav { max-width: 100%; overflow-x: auto; }
 nav button { flex: none; white-space: nowrap; }
 .card:has(> table) { overflow-x: auto; }
+img.qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 12px; display: block; margin: 0 auto; }
