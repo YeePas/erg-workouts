@@ -153,4 +153,20 @@ a.link:hover { text-decoration: underline; }
 .manual table.compact { margin: 8px 0; }
 .manual .copyright-line { text-align: center; margin-top: 48px; }
 @media (max-width: 600px) { .manual .toc ol { columns: 1; } }
-#help + .account { margin-left: 0; }
+#help + #report, #report + .account, #help + .account { margin-left: 0; }
+
+/* Beheer */
+.stats { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.stat .value { font-size: 28px; font-weight: 700; margin: 2px 0; }
+.bars { display: grid; gap: 6px; }
+.bar-row { display: grid; grid-template-columns: 64px 1fr 110px; gap: 10px; align-items: center; }
+.bar { height: 10px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; word-break: break-word; }
+pre.logs { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--bg); padding: 10px; border-radius: 8px; max-height: 360px; overflow: auto; white-space: pre-wrap; }
+.nowrap { white-space: nowrap; }
+label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
+.issue + .issue { margin-top: 14px; }
+.issue.opgelost { opacity: .6; }
+.issue .message { white-space: pre-wrap; margin: 0; }
+table.log-rows td { vertical-align: top; }

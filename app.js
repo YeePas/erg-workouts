@@ -53,6 +53,7 @@ async function run(promise, okMessage) {
 // MARK: Session
 
 async function start() {
+  $("#report").onclick = (event) => { event.preventDefault(); reportIssue(); };
   const { data } = await db.auth.getSession();
   state.user = data.session?.user ?? null;
   db.auth.onAuthStateChange((_event, session) => {
@@ -686,6 +687,29 @@ async function renderLeaderboard() {
       : `<p class="muted">Nog geen resultaten voor deze training.</p>`)
       + `<p class="muted small">${esc(summary(w))} · ${byTime ? "snelste tijd telt" : "meeste meters telt"}.</p>`;
   }
+}
+
+// MARK: Problemen melden
+
+/** Sends a report to the issues table; the admin sees it in admin.html. */
+function reportIssue() {
+  openDialog({
+    title: "Probleem melden",
+    body: `<label>Wat ging er mis? <textarea id="issue-text" style="min-height:140px"
+      placeholder="Beschrijf wat je deed en wat er gebeurde."></textarea></label>
+      <p class="muted small">Je melding gaat naar de beheerder van Erg Workouts.</p>`,
+    saveLabel: "Verstuur",
+    onSave: async (root) => {
+      const message = $("#issue-text", root).value.trim();
+      if (!message) {
+        toast("Beschrijf eerst het probleem", true);
+        throw new Error("empty");
+      }
+      await run(db.from("issues").insert({
+        source: "web", message, app_version: "website", device: navigator.userAgent.slice(0, 200),
+      }), "Bedankt, je melding is verstuurd");
+    },
+  });
 }
 
 // MARK: Dialog

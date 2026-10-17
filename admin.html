@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Erg Workouts · Beheer</title>
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="style.css?v=13">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icon.png" alt="" width="32" height="32"> <span>Erg Workouts</span> <small>beheer</small></div>
+    <nav id="nav" hidden>
+      <button data-page="overview">Overzicht</button>
+      <button data-page="issues">Meldingen</button>
+      <button data-page="logs">Logs</button>
+      <button data-page="gyms">Sportscholen</button>
+      <button data-page="users">Gebruikers</button>
+      <button data-page="settings">Instellingen</button>
+    </nav>
+    <div id="account" class="account"></div>
+  </header>
+
+  <main id="main"><p class="muted">Laden…</p></main>
+
+  <dialog id="dialog"></dialog>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="admin.js?v=13"></script>
+</body>
+</html>
