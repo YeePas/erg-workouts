@@ -4,7 +4,7 @@ import {
   uuid, clock, clockTenths, percent, parseClock, watts, paceDistance,
   workout, interval, summary, standard, fresh,
   dayString, parseDay, monday, addDays, sessionDate, programWeek, programStatus,
-  sessionsInWeek, copyWeek, programFromTemplate, copyFor,
+  sessionsInWeek, copyWeek, programFromTemplate, copyFor, copyProgramFor,
 } from "./model.js";
 
 // Same project and publishable key as the app; row level security protects the data.
@@ -309,7 +309,7 @@ function renderPrograms() {
       <div class="card stack">
         <div><strong>${esc(p.name)}</strong><div class="muted small">${programStatus(p)} · ${p.sessions.length} trainingen in ${p.weeks} weken</div>
         <div class="muted small">Start ${parseDay(p.start_date).toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" })}</div></div>
-        <div class="row"><button data-open="${p.id}">Openen</button></div>
+        <div class="row"><button data-open="${p.id}">Openen</button><span class="spacer"></span>${programCopySelect(p.id)}</div>
       </div>`).join("") || `<p class="muted">Nog geen programma's.</p>`}
     </div>`;
   $("#new-program").onclick = () => {
@@ -320,6 +320,26 @@ function renderPrograms() {
   $$("[data-open]").forEach((b) => (b.onclick = () => {
     state.program = structuredClone(state.programs.find((p) => p.id === b.dataset.open));
     renderProgramEditor();
+  }));
+  bindProgramCopy((id) => state.programs.find((p) => p.id === id));
+}
+
+/** "Kopieer voor…" for a whole program: every training converted for one machine. */
+function programCopySelect(id) {
+  return `<select class="copy-for" data-copy-program="${id}" title="Het hele programma voor één apparaat">
+    <option value="">Kopieer voor…</option>
+    ${MACHINES.map((m) => `<option value="${m}">${MACHINE_ICON[m]} ${MACHINE_LABEL[m]}</option>`).join("")}
+  </select>`;
+}
+
+function bindProgramCopy(find) {
+  $$("[data-copy-program]").forEach((select) => (select.onchange = () => {
+    const machine = select.value;
+    select.value = "";
+    if (!machine) return;
+    state.program = copyProgramFor(find(select.dataset.copyProgram), machine);
+    renderProgramEditor();
+    toast(`Kopie voor ${MACHINE_LABEL[machine]}: controleer en publiceer`);
   }));
 }
 
@@ -356,7 +376,7 @@ function renderProgramEditor() {
   $("#main").innerHTML = `
     <div class="row"><button class="link" id="back">← Programma's</button></div>
     <div class="row"><h1>${esc(p.name)}</h1><span class="spacer"></span>
-      ${p.isNew ? "" : `<button class="danger" id="delete-program">Verwijderen</button>`}
+      ${p.isNew ? "" : `${programCopySelect(p.id)}<button class="danger" id="delete-program">Verwijderen</button>`}
       <button class="primary" id="save-program">${p.isNew ? "Publiceer" : "Opslaan"}</button>
     </div>
     <div class="card stack">
@@ -404,6 +424,7 @@ function renderProgramEditor() {
   $("#p-weeks").onchange = () => { readHeader(); renderProgramEditor(); };
   $("#p-start").onchange = () => { readHeader(); renderProgramEditor(); };
   $("#back").onclick = () => { state.program = null; renderPrograms(); };
+  bindProgramCopy(() => { readHeader(); return p; });
   $("#save-program").onclick = async () => {
     readHeader();
     p.sessions = p.sessions.filter((s) => s.week <= p.weeks);

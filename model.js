@@ -137,6 +137,14 @@ export function standard(machine) {
 }
 
 /** A copy with its own id, so a training gets its own leaderboard. */
+/** A new program with every training converted for one machine; same start and length. */
+export function copyProgramFor(p, machine) {
+  return {
+    ...structuredClone(p), id: uuid(), name: `${p.name.replace(/ · (RowErg|SkiErg|BikeErg)$/, "")} · ${MACHINE_LABEL[machine]}`, isNew: true,
+    sessions: p.sessions.map((s) => ({ ...s, id: uuid(), workout: copyFor(s.workout, machine) })),
+  };
+}
+
 /** A new copy for another machine, with distances converted ("Kopieer voor …"). */
 export const copyFor = (w, machine) => fresh(onMachine(w, machine));
 export const fresh = (w) => ({ ...structuredClone(w), id: uuid(), intervals: (w.intervals || []).map((i) => ({ ...i, id: uuid() })) });
