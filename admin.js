@@ -1,4 +1,8 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
+import {
+  MACHINE_LABEL, MACHINE_ICON, WEEKDAYS, summary, sessionDate, programStatus, programWeek,
+  parseDay, dayString, monday, addDays,
+} from "./model.js";
 
 // Same project and key as the app. Everything here goes through admin-only functions
 // (supabase/admin.sql): without an admin account the database returns nothing.
@@ -14,7 +18,7 @@ const date = (value, withTime = true) => value
     ? { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }
     : { day: "numeric", month: "short", year: "numeric" })
   : "–";
-const MACHINE = { rower: "RowErg", skiErg: "SkiErg", bikeErg: "BikeErg" };
+const MACHINE = MACHINE_LABEL;
 
 const state = {
   user: null,
@@ -232,7 +236,7 @@ async function renderGyms() {
       ${gyms.map((g) => `<tr><td><strong>${esc(g.name)}</strong><div class="muted small">sinds ${date(g.created_at, false)}</div></td>
         <td class="mono">${esc(g.join_code)}</td><td class="small">${esc(g.account ?? "—")}</td>
         <td class="num">${g.members}</td><td class="num">${g.trainings}</td><td class="num">${g.programs}</td><td class="num">${g.results_30d}</td>
-        <td class="nowrap"><button class="link" data-edit="${g.id}">Wijzig</button><button class="link danger" data-delete="${g.id}">Verwijder</button></td></tr>`).join("")}</table>`
+        <td class="nowrap"><button class="link" data-view="${g.id}">Bekijk</button><button class="link" data-edit="${g.id}">Wijzig</button><button class="link danger" data-delete="${g.id}">Verwijder</button></td></tr>`).join("")}</table>`
       : `<p class="muted">Nog geen sportscholen.</p>`}</div>`;
 
   $("#new-gym").onclick = () => openDialog({
@@ -257,6 +261,7 @@ async function renderGyms() {
       renderGyms();
     },
   });
+  $$("[data-view]").forEach((b) => (b.onclick = () => renderGymDetail(gyms.find((x) => x.id === b.dataset.view))));
   $$("[data-edit]").forEach((b) => (b.onclick = () => {
     const g = gyms.find((x) => x.id === b.dataset.edit);
     openDialog({
@@ -276,6 +281,69 @@ async function renderGyms() {
     await run(db.rpc("admin_delete_gym", { gym: g.id }), "Sportschool verwijderd");
     renderGyms();
   }));
+}
+
+/** Read-only view of one gym's one-off trainings and programs, to help the gym. */
+async function renderGymDetail(g) {
+  $("#main").innerHTML = `<div class="row"><button class="link" id="back">← Sportscholen</button></div><h1>${esc(g.name)}</h1><p class="muted">Laden…</p>`;
+  $("#back").onclick = renderGyms;
+  const today = new Date();
+  const from = addDays(monday(today), -14);
+  const to = addDays(monday(today), 6 * 7 - 1);
+  const [workouts, programs] = await Promise.all([
+    run(db.rpc("admin_gym_workouts", { gym: g.id, from_date: dayString(from), to_date: dayString(to) })),
+    run(db.rpc("admin_gym_programs", { gym: g.id })),
+  ]);
+
+  const dayLabel = (date) => `${WEEKDAYS[(date.getDay() + 6) % 7]} ${date.toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}`;
+  const training = (w, label, note) => `<div class="training">
+    <div class="icon" title="${MACHINE_LABEL[w.machine]}">${MACHINE_ICON[w.machine]}</div>
+    <div class="body"><div class="name">${label ? `<span class="muted">${esc(label)} · </span>` : ""}${esc(w.name)}</div>
+      <div class="meta">${MACHINE_LABEL[w.machine]} · ${esc(summary(w))}</div>
+      ${note ? `<div class="meta">${esc(note)}</div>` : ""}</div></div>`;
+
+  // One-off trainings, grouped per week.
+  const weeks = [];
+  for (let start = monday(from); start <= to; start = addDays(start, 7)) {
+    const items = workouts.filter((w) => {
+      const day = parseDay(w.scheduled_for);
+      return day >= start && day < addDays(start, 7);
+    });
+    weeks.push({ start, items });
+  }
+  const thisWeek = dayString(monday(today));
+  const oneOffs = weeks.some((w) => w.items.length) ? weeks.map(({ start, items }) => `
+    <div class="week-block ${dayString(start) === thisWeek ? "current" : ""}">
+      <div class="muted small"><strong>Week van ${start.toLocaleDateString("nl-NL", { day: "numeric", month: "long" })}</strong>${dayString(start) === thisWeek ? " · deze week" : ""}</div>
+      ${items.length ? items.map((i) => training(i.workout, dayLabel(parseDay(i.scheduled_for)), i.note)).join("") : `<p class="muted small">Geen losse trainingen.</p>`}
+    </div>`).join("") : `<p class="muted">Geen losse trainingen tussen ${from.toLocaleDateString("nl-NL")} en ${to.toLocaleDateString("nl-NL")}.</p>`;
+
+  // Programs with all their weeks; the running week is open.
+  const programCards = programs.length ? programs.map((p) => {
+    const current = programWeek(p);
+    const weekList = Array.from({ length: p.weeks }, (_, n) => n + 1).map((week) => {
+      const sessions = p.sessions.filter((s) => s.week === week).sort((a, b) => a.weekday - b.weekday);
+      return `<details ${week === current ? "open" : ""}>
+        <summary><strong>Week ${week}</strong> <span class="muted small">${addDays(parseDay(p.start_date), (week - 1) * 7).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
+          · ${sessions.length} ${sessions.length === 1 ? "training" : "trainingen"}${week === current ? " · deze week" : ""}</span></summary>
+        ${sessions.length ? sessions.map((s) => training(s.workout, dayLabel(sessionDate(p, s)), s.note)).join("") : `<p class="muted small">Geen trainingen.</p>`}
+      </details>`;
+    }).join("");
+    return `<div class="card stack"><div><strong>${esc(p.name)}</strong>
+      <div class="muted small">${programStatus(p)} · start ${parseDay(p.start_date).toLocaleDateString("nl-NL", { weekday: "long", day: "numeric", month: "long" })} · ${p.sessions.length} trainingen in ${p.weeks} weken</div></div>
+      ${weekList}</div>`;
+  }).join("") : `<div class="card"><p class="muted">Nog geen programma's.</p></div>`;
+
+  $("#main").innerHTML = `
+    <div class="row"><button class="link" id="back">← Sportscholen</button></div>
+    <div class="row"><h1>${esc(g.name)}</h1><span class="spacer"></span><button id="refresh">Vernieuwen</button></div>
+    <p class="muted">Code <strong class="mono">${esc(g.join_code)}</strong> · account ${esc(g.account ?? "—")} · ${g.members} leden · alleen inzien</p>
+    <h2>Losse trainingen</h2>
+    <div class="card stack">${oneOffs}</div>
+    <h2>Programma's</h2>
+    <div class="stack">${programCards}</div>`;
+  $("#back").onclick = renderGyms;
+  $("#refresh").onclick = () => renderGymDetail(g);
 }
 
 // MARK: Gebruikers
