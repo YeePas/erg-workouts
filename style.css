@@ -136,3 +136,21 @@ dialog .foot { display: flex; gap: 10px; justify-content: flex-end; padding: 14p
 .copyright img { display: block; width: 56px; margin: 0 auto 6px; border-radius: 4px; opacity: 0.6; }
 select.copy-for { width: auto; padding: 4px 6px; font-size: 13px; color: var(--accent); background: transparent; border-color: transparent; cursor: pointer; }
 select.copy-for:hover { border-color: var(--line); }
+#help { margin-left: auto; }
+a.link { color: var(--accent); text-decoration: none; padding: 4px 6px; }
+a.link:hover { text-decoration: underline; }
+
+/* Handleiding */
+.manual { max-width: 760px; line-height: 1.6; }
+.manual .lead { font-size: 17px; }
+.manual section { margin-top: 36px; scroll-margin-top: 80px; }
+.manual h2 { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.manual h3 { margin: 18px 0 4px; font-size: 16px; }
+.manual li { margin: 4px 0; }
+.manual a { color: var(--accent); }
+.manual .toc { display: block; }
+.manual .toc ol { margin: 8px 0 0; padding-left: 22px; columns: 2; }
+.manual table.compact { margin: 8px 0; }
+.manual .copyright-line { text-align: center; margin-top: 48px; }
+@media (max-width: 600px) { .manual .toc ol { columns: 1; } }
+#help + .account { margin-left: 0; }
