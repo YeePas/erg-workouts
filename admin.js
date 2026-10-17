@@ -24,7 +24,7 @@ const state = {
   user: null,
   page: location.hash.slice(1) || "overview",
   logs: { search: "", errors: false, rows: 500 },
-  userFilter: "",
+  userFilters: null,
 };
 
 function toast(message, isError = false) {
@@ -411,20 +411,62 @@ async function renderGymDetail(g) {
 
 // MARK: Gebruikers
 
+/** Gym names a user belongs to, with whether they are that gym's account. */
+function userGyms(u) {
+  return (u.gyms ?? "").split(", ").filter(Boolean).map((part) => ({
+    name: part.replace(/ \(account\)$/, ""), isAccount: part.endsWith(" (account)"),
+  }));
+}
+
+const USER_FILTER_DEFAULTS = { q: "", gym: "", kind: "", activity: "", hidden: false, logging: false, sort: "new" };
+
 async function renderUsers() {
   $("#main").innerHTML = `<h1>Gebruikers</h1><p class="muted">Laden…</p>`;
   const users = await run(db.rpc("admin_users"));
+  const f = (state.userFilters ??= { ...USER_FILTER_DEFAULTS });
+  const gymNames = [...new Set(users.flatMap((u) => userGyms(u).map((g) => g.name)))].sort((a, b) => a.localeCompare(b, "nl"));
+  const daysAgo = (value) => (value ? (Date.now() - new Date(value)) / 86400000 : Infinity);
+
+  const matches = (u) => {
+    const gyms = userGyms(u);
+    if (f.q) {
+      const q = f.q.toLowerCase();
+      if (![u.email, u.display_name, u.gyms].some((v) => (v ?? "").toLowerCase().includes(q))) return false;
+    }
+    if (f.gym === "-" && gyms.length) return false;
+    if (f.gym && f.gym !== "-" && !gyms.some((g) => g.name === f.gym)) return false;
+    const isAccount = gyms.some((g) => g.isAccount);
+    if (f.kind === "member" && (u.is_admin || isAccount)) return false;
+    if (f.kind === "account" && !isAccount) return false;
+    if (f.kind === "admin" && !u.is_admin) return false;
+    const idle = daysAgo(u.last_result);
+    if (f.activity === "7" && idle > 7) return false;
+    if (f.activity === "30" && idle > 30) return false;
+    if (f.activity === "idle" && (idle <= 30 || u.results === 0)) return false;
+    if (f.activity === "never" && u.results > 0) return false;
+    if (f.hidden && u.show_on_leaderboard) return false;
+    if (f.logging && u.remote_logging !== true) return false;
+    return true;
+  };
+  const sorters = {
+    new: (a, b) => new Date(b.created_at) - new Date(a.created_at),
+    active: (a, b) => daysAgo(a.last_result) - daysAgo(b.last_result),
+    results: (a, b) => b.results - a.results,
+    name: (a, b) => (a.display_name || a.email).localeCompare(b.display_name || b.email, "nl"),
+  };
+
   const draw = () => {
-    const q = state.userFilter.toLowerCase();
-    const shown = users.filter((u) => !q || [u.email, u.display_name, u.gyms].some((v) => (v ?? "").toLowerCase().includes(q)));
-    $("#user-table").innerHTML = `<table><tr><th>Gebruiker</th><th>Sportschool</th><th class="num">Trainingen</th><th>Laatste training</th><th>Laatst ingelogd</th><th></th></tr>
+    const shown = users.filter(matches).sort(sorters[f.sort] ?? sorters.new);
+    $("#user-table").innerHTML = shown.length ? `<table><tr><th>Gebruiker</th><th>Sportschool</th><th class="num">Trainingen</th><th>Laatste training</th><th>Laatst ingelogd</th><th></th></tr>
       ${shown.map((u) => `<tr><td><strong>${esc(u.display_name || "—")}</strong>${u.is_admin ? ` <span class="tag">beheerder</span>` : ""}
-          ${u.show_on_leaderboard ? "" : ` <span class="tag orange">verborgen</span>`}
+          ${u.show_on_leaderboard ? "" : ` <span class="tag orange">verborgen</span>`}${u.remote_logging === true ? ` <span class="tag">logging</span>` : ""}
           <div class="muted small">${esc(u.email)}</div></td>
         <td class="small">${esc(u.gyms ?? "—")}</td><td class="num">${u.results}</td>
         <td class="small">${date(u.last_result, false)}</td><td class="small">${date(u.last_sign_in_at)}</td>
-        <td class="nowrap"><button class="link" data-edit="${u.id}">Wijzig</button>${u.is_admin ? "" : `<button class="link danger" data-delete="${u.id}">Verwijder</button>`}</td></tr>`).join("")}</table>
-      <p class="muted small">${shown.length} van ${users.length} gebruikers</p>`;
+        <td class="nowrap"><button class="link" data-edit="${u.id}">Wijzig</button>${u.is_admin ? "" : `<button class="link danger" data-delete="${u.id}">Verwijder</button>`}</td></tr>`).join("")}</table>`
+      : `<p class="muted">Geen gebruikers met deze filters.</p>`;
+    $("#user-count").textContent = `${shown.length} van ${users.length} gebruikers`;
+    $("#reset-filters").hidden = JSON.stringify(f) === JSON.stringify(USER_FILTER_DEFAULTS);
     $$("[data-edit]").forEach((b) => (b.onclick = () => editUser(users.find((u) => u.id === b.dataset.edit))));
     $$("[data-delete]").forEach((b) => (b.onclick = async () => {
       const u = users.find((x) => x.id === b.dataset.delete);
@@ -433,12 +475,27 @@ async function renderUsers() {
       renderUsers();
     }));
   };
+
+  const option = (value, label, current) => `<option value="${esc(value)}" ${value === current ? "selected" : ""}>${esc(label)}</option>`;
   $("#main").innerHTML = `
-    <div class="row"><h1>Gebruikers</h1><span class="spacer"></span>
-      <input id="user-filter" placeholder="Zoek op naam, e-mail of sportschool" value="${esc(state.userFilter)}" style="min-width:260px"></div>
-    <div class="card" id="user-table"></div>
+    <div class="row"><h1>Gebruikers</h1><span class="spacer"></span><span class="muted small" id="user-count"></span></div>
+    <div class="card filters">
+      <input id="f-q" placeholder="Zoek op naam, e-mail of sportschool" value="${esc(f.q)}">
+      <select id="f-gym">${option("", "Alle sportscholen", f.gym)}${option("-", "Geen sportschool", f.gym)}${gymNames.map((n) => option(n, n, f.gym)).join("")}</select>
+      <select id="f-kind">${option("", "Iedereen", f.kind)}${option("member", "Leden", f.kind)}${option("account", "Sportschoolaccounts", f.kind)}${option("admin", "Beheerders", f.kind)}</select>
+      <select id="f-activity">${option("", "Elke activiteit", f.activity)}${option("7", "Getraind deze week", f.activity)}${option("30", "Getraind in 30 dagen", f.activity)}${option("idle", "Langer dan 30 dagen niet", f.activity)}${option("never", "Nog nooit getraind", f.activity)}</select>
+      <select id="f-sort">${option("new", "Nieuwste eerst", f.sort)}${option("active", "Laatst getraind", f.sort)}${option("results", "Meeste trainingen", f.sort)}${option("name", "Naam", f.sort)}</select>
+      <label class="check"><input type="checkbox" id="f-hidden" ${f.hidden ? "checked" : ""}> Verborgen op leaderboard</label>
+      <label class="check"><input type="checkbox" id="f-logging" ${f.logging ? "checked" : ""}> Logging aan</label>
+      <button class="link" id="reset-filters">Filters wissen</button>
+    </div>
+    <div class="card" id="user-table" style="margin-top:14px"></div>
     <p class="muted small">Wachtwoorden herstellen gaat via Supabase → Authentication → Users.</p>`;
-  $("#user-filter").oninput = (e) => { state.userFilter = e.target.value; draw(); };
+
+  $("#f-q").oninput = (e) => { f.q = e.target.value.trim(); draw(); };
+  for (const key of ["gym", "kind", "activity", "sort"]) $(`#f-${key}`).onchange = (e) => { f[key] = e.target.value; draw(); };
+  for (const key of ["hidden", "logging"]) $(`#f-${key}`).onchange = (e) => { f[key] = e.target.checked; draw(); };
+  $("#reset-filters").onclick = () => { state.userFilters = { ...USER_FILTER_DEFAULTS }; renderUsers(); };
   draw();
 }
 

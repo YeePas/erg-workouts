@@ -179,3 +179,5 @@ nav { max-width: 100%; overflow-x: auto; }
 nav button { flex: none; white-space: nowrap; }
 .card:has(> table) { overflow-x: auto; }
 img.qr { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 12px; display: block; margin: 0 auto; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.filters #f-q { flex: 1; min-width: 220px; }
