@@ -116,6 +116,7 @@ function renderLogin() {
       <label>Wachtwoord <input name="password" type="password" autocomplete="current-password" required></label>
       <button class="primary" type="submit">Inloggen</button>
       <p class="error small" id="login-error"></p>
+      <button class="link small" type="button" id="forgot">Wachtwoord vergeten?</button>
     </form>
     <div class="copyright muted small"><img src="logo.png" alt="">© ${new Date().getFullYear()} Warenhuis Willemsen</div>`;
   $("#login").onsubmit = async (event) => {
@@ -125,6 +126,43 @@ function renderLogin() {
     const email = login.includes("@") ? login : `${login.toLowerCase()}@ergworkouts.test`;
     const { error } = await db.auth.signInWithPassword({ email, password: String(form.get("password")) });
     if (error) $("#login-error").textContent = error.message === "Invalid login credentials" ? "Onjuiste gebruikersnaam of wachtwoord." : error.message;
+  };
+  $("#forgot").onclick = () => renderReset();
+}
+
+/** "Wachtwoord vergeten": a code by e-mail (the Reset password template), then a new password. */
+function renderReset(email = "") {
+  $("#main").innerHTML = `
+    <form class="card login stack" id="reset">
+      <h1>Wachtwoord vergeten</h1>
+      ${email ? `
+        <p class="muted">We hebben een code gestuurd naar ${esc(email)}.</p>
+        <label>Code uit de e-mail <input name="code" inputmode="numeric" autocomplete="one-time-code" required></label>
+        <label>Nieuw wachtwoord <input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <button class="primary" type="submit">Wachtwoord opslaan</button>`
+      : `
+        <p class="muted">Je krijgt een code per e-mail waarmee je een nieuw wachtwoord kiest.</p>
+        <label>E-mailadres <input name="email" type="email" autocomplete="email" required></label>
+        <button class="primary" type="submit">Stuur code</button>`}
+      <p class="error small" id="reset-error"></p>
+      <button class="link small" type="button" id="back">Terug naar inloggen</button>
+    </form>`;
+  $("#back").onclick = () => renderLogin();
+  $("#reset").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    const fail = (error) => { $("#reset-error").textContent = error.message; };
+    if (!email) {
+      const address = String(form.get("email")).trim();
+      const { error } = await db.auth.resetPasswordForEmail(address);
+      return error ? fail(error) : renderReset(address);
+    }
+    const password = String(form.get("password"));
+    const verified = await db.auth.verifyOtp({ email, token: String(form.get("code")).trim(), type: "recovery" });
+    if (verified.error) return fail(verified.error);
+    // Signed in now (the page switches to the planning); set the new password.
+    const { error } = await db.auth.updateUser({ password });
+    if (error) alert(`Je bent ingelogd, maar het nieuwe wachtwoord is niet opgeslagen: ${error.message}`);
   };
 }
 
