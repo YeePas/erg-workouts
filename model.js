@@ -10,8 +10,10 @@ export const paceDistance = (machine) => (machine === "bikeErg" ? 1000 : 500);
 export const KINDS = {
   distance: "Afstand",
   time: "Tijd",
+  calories: "Calorieën",
   distanceIntervals: "Intervallen (afstand)",
   timeIntervals: "Intervallen (tijd)",
+  calorieIntervals: "Intervallen (calorieën)",
   custom: "Eigen intervallen",
 };
 
@@ -74,13 +76,25 @@ function target(item, unit) {
   return "";
 }
 
+export const isIntervalKind = (kind) => kind === "distanceIntervals" || kind === "timeIntervals" || kind === "calorieIntervals";
+export const usesCalories = (kind) => kind === "calories" || kind === "calorieIntervals";
+/** Calories of a calorie workout, with the app's default when not set yet. */
+export const calorieGoal = (w) => w.calories ?? (isIntervalKind(w.kind) ? 20 : 50);
+/** "time", "distance" or "calories": what ends an interval. */
+export const measure = (i) => (i.calories != null ? "calories" : i.usesDistance ? "distance" : "time");
+
+function length(i) {
+  return { calories: `${i.calories} cal`, distance: `${i.distance}m`, time: clock(i.duration) }[measure(i)];
+}
+
 export function summary(w) {
   const unit = `/${paceDistance(w.machine)}m`;
   if (w.kind === "custom") {
-    return w.intervals.map((i) => (i.usesDistance ? `${i.distance}m` : clock(i.duration)) + target(i, "")).join(" · ");
+    return w.intervals.map((i) => length(i) + target(i, "")).join(" · ");
   }
-  const work = w.kind === "distance" || w.kind === "distanceIntervals" ? `${w.distance}m` : clock(w.duration);
-  const isInterval = w.kind === "distanceIntervals" || w.kind === "timeIntervals";
+  const work = usesCalories(w.kind) ? `${calorieGoal(w)} cal`
+    : w.kind === "distance" || w.kind === "distanceIntervals" ? `${w.distance}m` : clock(w.duration);
+  const isInterval = isIntervalKind(w.kind);
   return (isInterval ? `${w.intervalCount} × ${work} / ${clock(w.rest)} rust` : work) + target(w, unit);
 }
 

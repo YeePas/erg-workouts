@@ -1,6 +1,6 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
 import {
-  MACHINES, MACHINE_LABEL, MACHINE_ICON, KINDS, WEEKDAYS, TEMPLATES,
+  MACHINES, MACHINE_LABEL, MACHINE_ICON, KINDS, WEEKDAYS, TEMPLATES, isIntervalKind, usesCalories, calorieGoal, measure,
   uuid, clock, clockTenths, percent, parseClock, watts, paceDistance,
   workout, interval, summary, standard, fresh,
   dayString, parseDay, monday, addDays, sessionDate, programWeek, programStatus,
@@ -491,7 +491,7 @@ function mountWorkoutForm(root, initial) {
   const draw = () => {
     const w = root.workout;
     const isDistance = w.kind === "distance" || w.kind === "distanceIntervals";
-    const isInterval = w.kind === "distanceIntervals" || w.kind === "timeIntervals";
+    const isInterval = isIntervalKind(w.kind);
     root.innerHTML = `
       <div class="fields">
         <label style="grid-column: span 2">Kies uit standaard
@@ -506,7 +506,8 @@ function mountWorkoutForm(root, initial) {
       </div>
       ${w.kind === "custom" ? customRows(w) : `
       <div class="fields" style="margin-top:12px">
-        ${isDistance ? `<label>Afstand (m) <input type="number" data-k="distance" min="100" step="100" value="${w.distance}"></label>`
+        ${usesCalories(w.kind) ? `<label>Calorieën <input type="number" data-k="calories" min="1" step="1" value="${calorieGoal(w)}"></label>`
+          : isDistance ? `<label>Afstand (m) <input type="number" data-k="distance" min="100" step="100" value="${w.distance}"></label>`
                      : `<label>Tijd (m:ss) <input data-k="duration" value="${clock(w.duration)}"></label>`}
         ${isInterval ? `<label>Aantal <input type="number" data-k="intervalCount" min="1" max="30" value="${w.intervalCount}"></label>
                         <label>Rust (m:ss) <input data-k="rest" value="${clock(w.rest)}"></label>` : ""}
@@ -551,8 +552,8 @@ function customRows(w) {
   return `<div style="margin-top:12px">${w.intervals.map((i, n) => `
     <div class="interval-row" data-row="${n}">
       <div class="n">${n + 1}</div>
-      <label>Op <select data-i="type"><option value="time" ${i.usesDistance ? "" : "selected"}>Tijd</option><option value="distance" ${i.usesDistance ? "selected" : ""}>Afstand</option></select></label>
-      <label>${i.usesDistance ? "Afstand (m)" : "Tijd (m:ss)"} <input data-i="value" value="${i.usesDistance ? i.distance : clock(i.duration)}"></label>
+      <label>Op <select data-i="type">${[["time", "Tijd"], ["distance", "Afstand"], ["calories", "Calorieën"]].map(([v, l]) => `<option value="${v}" ${measure(i) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label>${{ time: "Tijd (m:ss)", distance: "Afstand (m)", calories: "Calorieën" }[measure(i)]} <input data-i="value" value="${{ time: clock(i.duration), distance: i.distance, calories: i.calories }[measure(i)]}"></label>
       <label>Rust erna <input data-i="rest" value="${clock(i.rest)}"></label>
       ${targetFields(i, "x")}
       <button class="link danger" data-remove-interval="${n}" title="Verwijder">✕</button>
@@ -578,7 +579,9 @@ function readInto(root) {
       w.intervals = [interval({ duration: 240, rest: 90, targetPercent: 74 }), interval({ duration: 180, rest: 90, targetPercent: 78 })];
     }
     w.kind = kind;
+    if (usesCalories(kind)) w.calories = calorieGoal(w);
   }
+  if (value("calories") != null) w.calories = Math.max(1, Math.round(Number(value("calories")) || calorieGoal(w)));
   if (value("distance") != null) w.distance = Math.max(100, Math.round(Number(value("distance")) || 2000));
   if (value("duration") != null) w.duration = Math.max(10, Math.round(parseClock(value("duration")) || 600));
   if (value("intervalCount") != null) w.intervalCount = Math.min(Math.max(Math.round(Number(value("intervalCount")) || 1), 1), 30);
@@ -591,10 +594,13 @@ function readInto(root) {
   $$("[data-row]", root).forEach((row) => {
     const i = w.intervals[Number(row.dataset.row)];
     const field = (key) => $(`[data-i=${key}]`, row)?.value;
-    const usesDistance = field("type") === "distance";
-    if (usesDistance !== i.usesDistance) {
-      i.usesDistance = usesDistance;
-    } else if (usesDistance) {
+    const type = field("type");
+    if (type !== measure(i)) {
+      i.usesDistance = type === "distance";
+      if (type === "calories") i.calories = 20; else delete i.calories;
+    } else if (type === "calories") {
+      i.calories = Math.max(1, Math.round(Number(field("value")) || 20));
+    } else if (type === "distance") {
       i.distance = Math.max(100, Math.round(Number(field("value")) || 500));
     } else {
       i.duration = Math.max(10, Math.round(parseClock(field("value")) || 60));
@@ -671,7 +677,9 @@ async function renderLeaderboard() {
     const item = trainings.find((t) => t.key === b.training);
     if (!item) return ($("#board").innerHTML = `<p class="muted">Geen trainingen in de afgelopen vier weken.</p>`);
     const w = item.workout;
-    const byTime = w.kind === "distance" || w.kind === "distanceIntervals" || (w.kind === "custom" && w.intervals.every((i) => i.usesDistance));
+    // A fixed distance or number of calories: the fastest wins.
+    const byTime = ["distance", "distanceIntervals", "calories", "calorieIntervals"].includes(w.kind)
+      || (w.kind === "custom" && w.intervals.every((i) => measure(i) !== "time"));
     const rows = await run(db.rpc("leaderboard_training", { gym: state.gymId, workout: w.id, machine_name: w.machine })) ?? [];
     const best = Object.values(rows.reduce((acc, r) => {
       const old = acc[r.member];
