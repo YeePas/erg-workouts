@@ -68,7 +68,7 @@ async function load() {
   renderAccount();
   if (!state.user) return renderLogin();
   const memberships = await run(
-    db.from("gym_members").select("role, gyms(id, name, join_code)").eq("user_id", state.user.id)
+    db.from("gym_members").select("role, gyms(id, name, join_code, leaderboard_enabled)").eq("user_id", state.user.id)
   );
   state.gyms = memberships.filter((m) => m.role === "coach").map((m) => m.gyms);
   if (!state.gyms.length) {
@@ -689,12 +689,25 @@ async function renderLeaderboard() {
         `<option value="${t.key}" ${t.key === b.training ? "selected" : ""}>${dateLabel(t.date)} · ${esc(t.workout.name)} · ${MACHINE_LABEL[t.workout.machine]}</option>`).join("")}</select>` : "");
 
   $("#main").innerHTML = `
-    <div class="row"><h1>Leaderboard</h1><span class="spacer"></span><button class="danger" id="reset">Leegmaken</button></div>
+    <div class="row"><h1>Leaderboard</h1><span class="spacer"></span>
+      <label class="row small" style="gap:6px"><input type="checkbox" id="lb-enabled" ${gym().leaderboard_enabled === false ? "" : "checked"}> Zichtbaar voor leden</label>
+      <button class="danger" id="reset">Leegmaken</button></div>
+    ${gym().leaderboard_enabled === false ? `<p class="card muted">Het leaderboard staat uit: leden zien het niet in de app. Jij ziet de ranglijsten hier nog wel.</p>` : ""}
     <div class="row">${segmented("kind", [["programs", "Programma's"], ["trainings", "Trainingen"]])} ${picker}</div>
     <div class="card" style="margin-top:14px" id="board"><p class="muted">Laden…</p></div>`;
 
   $$("[data-kind]").forEach((button) => (button.onclick = () => { b.kind = button.dataset.kind; renderLeaderboard(); }));
   $("#pick") && ($("#pick").onchange = (e) => { b[b.kind === "programs" ? "program" : "training"] = e.target.value; renderLeaderboard(); });
+  $("#lb-enabled").onchange = async (event) => {
+    const enabled = event.target.checked;
+    try {
+      await run(db.rpc("set_leaderboard_enabled", { gym: state.gymId, enabled }),
+        enabled ? "Leaderboard staat aan" : "Leaderboard staat uit");
+      gym().leaderboard_enabled = enabled;
+    } finally {
+      renderLeaderboard();
+    }
+  };
   $("#reset").onclick = async () => {
     if (!confirm(`Leaderboard van ${gym().name} leegmaken? Alle ranglijsten beginnen opnieuw vanaf nu; resultaten blijven bewaard.`)) return;
     await run(db.rpc("reset_leaderboard", { gym: state.gymId }), "Leaderboard leeggemaakt");
